@@ -36,7 +36,7 @@ def implied_vol(double underlying, double price, double strike, double t, double
 
 #expects mids_df contents with underlying series and corresponding dte
 # -- assumes mids_df contains ONLY option symbols
-def imp_vols_cython(mids_df,underlying_series,some_dte,ir=.03,days_per_year=261.0):
+def imp_vols_cython(mids_df,underlying_series,some_dte,ir=.03,days_per_year=260.0):
     cdef:
         int i=0,j=0,mids_len = mids_df.shape[0],num_syms=mids_df.shape[1]
         double spot

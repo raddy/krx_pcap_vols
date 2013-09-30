@@ -5,10 +5,13 @@ from kospi_basis import nearby_calls_mask,nearby_puts_mask,kospi_strikes_from_sy
 from underlying_info import underlying_code,underlying_code_by_two_digit_code,underlyings
 from krx_dtes import dte
 from random_util import options_expiry_mask,altmoneys
-from krx_save_functions import save_mids,save_vol_tables,save_dtes
+from krx_save_functions import save_mids,save_vol_tables,save_dtes,save_syns,generic_save,save_supplementary
 from mids import mids
 from krx_vols import krx_vols
+from simple_models import kf_vols,splined_kf_residualized
+import cubic_regression_spline as crs
 import kf_linear
+from cycross import cycross
 
 
 
@@ -16,7 +19,7 @@ def result_dicts(some_mids,some_quotes,expiration_dict,trade_date,expiries):
     vol_results = dict()
     money_results = dict()
     dte_info = dict() #could be appended to expiry info but...
-
+    basis_info = dict()
     #loop through all your expiries
     # -- append basis to your weighted mids table (we'll store this later)
     # -- store vols/moneyness info into dicts temporarily
@@ -28,26 +31,35 @@ def result_dicts(some_mids,some_quotes,expiration_dict,trade_date,expiries):
         basis_code = exp+'-'+und_expiry_code+'-'+str(exp_dte)
         if und_expiry_code == exp: #quarterly
             spot_filtered = pd.Series(some_mids[und_sym].values,index=some_mids.index)
+            syn_spread = pd.Series(np.zeros(len(spot_filtered)),index=some_mids.index)
         else:
             spot = synthetic_offset(exp,und_sym,some_mids)
             if len(spot.valid()) == 0: #we were never able to calculate a synthetic basis and thus can't calc underlying
                 continue
-            spot_filtered = pd.Series(kf_linear.univariate_filter(spot,spot[spot.first_valid_index()],1,500).values+some_mids[und_sym].values,index=spot.index)
+            syn_spread = kf_linear.univariate_filter(spot,spot[spot.first_valid_index()],1,500).values
+            spot_filtered = pd.Series(syn_spread+some_mids[und_sym].values,index=spot.index)
             some_mids[basis_code] = spot_filtered
         vol_results[exp] = krx_vols.imp_vols_cython(some_mids.ix[:,options_expiry_mask(some_mids.columns,exp).values],spot_filtered,exp_dte)
         money_results[exp] = pd.DataFrame(altmoneys(spot_filtered.fillna(method='ffill').fillna(method='bfill').values,
-                    kospi_strikes_from_symbols(vol_results[exp].columns.values).values,exp_dte/261.0),
+                    kospi_strikes_from_symbols(vol_results[exp].columns.values).values,exp_dte/260.0),
                     index = some_mids.index, columns = vol_results[exp].columns)
         dte_info[exp] = exp_dte
-    return [vol_results,money_results,dte_info]
+        basis_info[exp] = pd.Series(syn_spread,index=spot.index)
+    return [vol_results,money_results,dte_info,basis_info]
+
+def filter_calls(some_df):
+    is_call = pd.Series(some_df.columns.values).str[2:4]=='42' 
+    res = some_df.ix[:,is_call.values].sort_index(axis=1)
+    res.columns = kospi_strikes_from_symbols(res.columns)
+    return res
+
 
 def add_vols(file_name):
     store = pd.HDFStore(file_name)
     pcap_info = store['pcap_data']
     quotes_only = pcap_info[np.logical_or(pcap_info.msg_type=='B6',pcap_info.msg_type=='G7')]
-    del pcap_info
     
-    todays_trade_date = pd.Timestamp(file_name.split('/')[-1].split('.pcap')[0].split('.')[-1][:8])
+    todays_trade_date = pd.Timestamp(file_name.split('/')[-1].split('.pcap')[0].split('T')[0])
     
     if '/expiry_info' in store.keys():
         expiration_dict = store['expiry_info'].to_dict()[0]
@@ -61,18 +73,29 @@ def add_vols(file_name):
     #time weighted mids via cython
     twmids = mids.quick_mids(todays_trade_date,quotes_only)
     #should be refactored into saving while building..but whatever
-    vols,moneys,dtes = result_dicts(twmids,quotes_only,expiration_dict,todays_trade_date,expiries)
+    vols,moneys,dtes,syns = result_dicts(twmids,quotes_only,expiration_dict,todays_trade_date,expiries)
     
     #We are abusing python scoping to modify that twmids frame INSIDE the result_dicts()
     #-- This is a bad idea and should be changed to at least be more epxlicit
-    
+    syn_df = pd.DataFrame(syns)
     save_dtes(store,dtes)
     save_mids(store,twmids)
+    save_syns(store,syn_df)
+
     for exp in expiries:
         if vols.has_key(exp) and moneys.has_key(exp):
-            save_vol_tables(store,exp,vols,moneys)
+            call_vols,call_moneys = filter_calls(vols[exp]),filter_calls(moneys[exp])
+            generic_save(store,call_vols,exp,'/vols')
+            generic_save(store,call_moneys,exp,'/moneys')
+            simple_kf_vols = kf_vols(call_vols)
+            generic_save(store,simple_kf_vols,exp,'/kf_vols')
+            generic_save(store,splined_kf_residualized(call_vols,simple_kf_vols,call_moneys),exp,'/kf_splined')
     print 'Finished saving vol tables to %s' %file_name
-    print store
+    del quotes_only
+    print 'Removing duplicate timestamps...'
+    pcap_info.index = cycross.fix_timestamps(pcap_info.index.values)
+    print 'Now adding supplementary info...'
+    save_supplementary(store,pcap_info,'/kf_splined')
     store.close()
 
 
