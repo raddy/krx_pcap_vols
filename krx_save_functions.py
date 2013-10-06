@@ -32,6 +32,7 @@ def save_supplementary(h5_pointer,pcap_info,vols_type):
     basis_series_list = []
     fut_bid_series_list = []
     fut_ask_series_list = []
+    print 'Pcap Info Length entering: ',len(pcap_info)
     for k in s[s.str.contains(vols_type)]:
         two_digit_code = k[1:3]
         my_und = underlying_code(underlying_code_by_two_digit_code(two_digit_code),underlyings(pcap_info)).values[0]
@@ -53,5 +54,7 @@ def save_supplementary(h5_pointer,pcap_info,vols_type):
     pcap_info['basis'] = pd.concat(basis_series_list).reindex_like(pcap_info)
     pcap_info['fut_bid'] = pd.concat(fut_bid_series_list).reindex_like(pcap_info)
     pcap_info['fut_ask'] = pd.concat(fut_ask_series_list).reindex_like(pcap_info)
+    h5_pointer.remove('supplementary')
+    print 'Pcap Info Length exiting: ',len(pcap_info)
     h5_pointer.append('supplementary',pcap_info.ix[:,['vols','basis','fut_bid','fut_ask']])
     

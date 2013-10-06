@@ -10,7 +10,7 @@ from mids import mids
 from krx_vols import krx_vols
 from simple_models import kf_vols,splined_kf_residualized
 import cubic_regression_spline as crs
-import kf_linear
+from cy_utility import univariate_kf
 from cycross import cycross
 
 
@@ -36,7 +36,7 @@ def result_dicts(some_mids,some_quotes,expiration_dict,trade_date,expiries):
             spot = synthetic_offset(exp,und_sym,some_mids)
             if len(spot.valid()) == 0: #we were never able to calculate a synthetic basis and thus can't calc underlying
                 continue
-            syn_spread = kf_linear.univariate_filter(spot,spot[spot.first_valid_index()],1,500).values
+            syn_spread = univariate_kf(spot.values,spot[spot.first_valid_index()],1,500)
             spot_filtered = pd.Series(syn_spread+some_mids[und_sym].values,index=spot.index)
             some_mids[basis_code] = spot_filtered
         vol_results[exp] = krx_vols.imp_vols_cython(some_mids.ix[:,options_expiry_mask(some_mids.columns,exp).values],spot_filtered,exp_dte)
@@ -94,6 +94,8 @@ def add_vols(file_name):
     del quotes_only
     print 'Removing duplicate timestamps...'
     pcap_info.index = cycross.fix_timestamps(pcap_info.index.values)
+    store.remove('pcap_data')
+    store.append('pcap_data',pcap_info)
     print 'Now adding supplementary info...'
     save_supplementary(store,pcap_info,'/kf_splined')
     store.close()
