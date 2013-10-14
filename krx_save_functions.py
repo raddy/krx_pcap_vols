@@ -2,8 +2,9 @@ import pandas as pd
 import numpy as np
 from underlying_info import underlying_code,underlying_code_by_two_digit_code,underlyings
 from kospi_basis import kospi_strikes_from_symbols
-from random_util import options_expiry_mask,altmoneys
+from random_util import options_expiry_mask,altmoneys,is_kospi,kospi_strikes_from_symbols,kospi_types_from_symbols,kospi_fresh
 from cycross import cycross
+from bsm_implieds import fast_implieds,implied_futs,deltas,net_effect_cython
 
 def save_mids(h5_pointer,some_mids):
     h5_pointer.put('twmids',some_mids)
@@ -57,4 +58,38 @@ def save_supplementary(h5_pointer,pcap_info,vols_type):
     h5_pointer.remove('supplementary')
     print 'Pcap Info Length exiting: ',len(pcap_info)
     h5_pointer.append('supplementary',pcap_info.ix[:,['vols','basis','fut_bid','fut_ask']])
+
+
+def save_implieds(h5_pointer, start_time,end_time,MAX_AGE=50,RISK_FREE=.03,GUESS=260):
+    s = pd.Series(h5_pointer['twmids'].columns)
+    front_syms = s[s.str.contains('-')].str[0:2].append(s[s.str.contains('-')].str[3:5]).unique()
+
+    dat = h5_pointer.select('pcap_data',[pd.Term('index','>=',start_time),pd.Term('index','<=',end_time)])
+    supp = h5_pointer.select('supplementary',[pd.Term('index','>=',start_time),pd.Term('index','<=',end_time)])
+    recombined_dat = (dat.join(supp,how='outer'))
+    recombined_dat = recombined_dat[is_kospi(dat.symbol).values]
+    expiries = recombined_dat.symbol.str[6:8]
+    recombined_dat = recombined_dat[expiries.isin(h5_pointer['dtes'].index).values]
+    recombined_dat['tte'] = recombined_dat.symbol.str[6:8].replace(h5_pointer['dtes'].to_dict()[0]).astype(float) / 260.
+    recombined_dat['strike'] = kospi_strikes_from_symbols(recombined_dat.symbol.values)
+    recombined_dat['type'] = kospi_types_from_symbols(recombined_dat.symbol.values)
+    recombined_dat = recombined_dat[recombined_dat.symbol.str[6:8].isin(front_syms).values]
+    recombined_dat = recombined_dat[kospi_fresh(recombined_dat.symbol,recombined_dat.tte.values,MAX_AGE/260.)]
+    implieds_frame = fast_implieds(recombined_dat.symbol,recombined_dat.bid1.astype(np.float64),recombined_dat.bidsize1,recombined_dat.bid2.astype(np.float64),recombined_dat.bidsize2,
+            recombined_dat.ask1.astype(np.float64),recombined_dat.asksize1,recombined_dat.ask2.astype(np.float64),recombined_dat.asksize2,
+              (recombined_dat.basis+recombined_dat.fut_bid),recombined_dat.basis,recombined_dat.vols,recombined_dat.tte,recombined_dat.strike.astype(np.float64),
+                recombined_dat.type.astype(long),RISK_FREE,GUESS)
+    implieds_frame.index = recombined_dat.index
+    
+    implieds_frame['delta_effect'] = net_effect_cython(recombined_dat.symbol,recombined_dat.bid1.astype(np.float64),recombined_dat.tradeprice.astype(np.float64),recombined_dat.tradesize)
+    implieds_frame['delta'] = deltas(recombined_dat.fut_bid.astype(np.float64),recombined_dat.strike.astype(np.float64),recombined_dat.vols,recombined_dat.tte,recombined_dat.type.astype(long),.03)
+    implieds_frame['implied_trd'] = implied_futs(recombined_dat.tradeprice.astype(np.float64),recombined_dat.strike.astype(np.float64),recombined_dat.vols,recombined_dat.tte,recombined_dat.type.astype(long),.03,26410) - recombined_dat.basis
+    implieds_frame['implied_trd'][(implieds_frame.delta.abs()<.15).values] = np.NaN
+    implieds_frame['delta'][(implieds_frame.delta.abs()<.15).values] = np.NaN
+    implieds_frame['delta_effect'] *= implieds_frame['delta']
+    implieds_frame = implieds_frame.drop_duplicates()
+    if '/implieds' in h5_pointer.keys():
+        print 'Deleteing old implieds frame...'
+        h5_pointer.remove('implieds')
+    h5_pointer.append('implieds',implieds_frame)
     

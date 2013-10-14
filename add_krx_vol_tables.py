@@ -5,7 +5,7 @@ from kospi_basis import nearby_calls_mask,nearby_puts_mask,kospi_strikes_from_sy
 from underlying_info import underlying_code,underlying_code_by_two_digit_code,underlyings
 from krx_dtes import dte
 from random_util import options_expiry_mask,altmoneys
-from krx_save_functions import save_mids,save_vol_tables,save_dtes,save_syns,generic_save,save_supplementary
+from krx_save_functions import save_mids,save_vol_tables,save_dtes,save_syns,generic_save,save_supplementary,save_implieds
 from mids import mids
 from krx_vols import krx_vols
 from simple_models import kf_vols,splined_kf_residualized
@@ -98,6 +98,12 @@ def add_vols(file_name):
     store.append('pcap_data',pcap_info)
     print 'Now adding supplementary info...'
     save_supplementary(store,pcap_info,'/kf_splined')
+    print 'Now appending implieds futures information...this takes ~15min'
+    del pcap_info
+    string_date = file_name.split('/')[-1].split('T')[0]
+    start_time = pd.Timestamp(string_date+'T09:00:00').value
+    end_time = pd.Timestamp(string_date+'T15:05:00').value
+    save_implieds(store,start_time,end_time)
     store.close()
 
 
