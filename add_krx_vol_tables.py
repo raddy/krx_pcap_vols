@@ -97,14 +97,16 @@ def add_vols(file_name):
     store.remove('pcap_data')
     store.append('pcap_data',pcap_info)
     print 'Now adding supplementary info...'
-    save_supplementary(store,pcap_info,'/kf_splined')
+    save_supplementary(store,pcap_info,'/kf_vols')
     print 'Now appending implieds futures information...this takes ~15min'
     del pcap_info
     string_date = file_name.split('/')[-1].split('T')[0]
     start_time = pd.Timestamp(string_date+'T09:00:00').value
     end_time = pd.Timestamp(string_date+'T15:05:00').value
-    save_implieds(store,start_time,end_time)
+    store2 = pd.HDFStore((string_date+'_implieds.h5'))
+    save_implieds(store,store2,start_time,end_time)
     store.close()
+    store2.close()
 
 
 def main(file_name):
