@@ -6,10 +6,11 @@ import cubic_regression_spline as crs
 def kf_vols(raw):
     simple_kf = raw.copy()
     for c in simple_kf.columns:
-      seed = simple_kf[c][simple_kf[c].first_valid_index()]
-      simple_kf[c] = univariate_kf(simple_kf[c].values,seed,seed/1000.,seed/10.)
-    return simple_kf
-
+      dex = simple_kf[c].first_valid_index()
+      if dex:
+          seed = simple_kf[c][dex]
+          simple_kf[c] = univariate_kf(simple_kf[c].values,seed,seed/1000.,seed/10.)
+      return simple_kf
 def splined_kf_residualized(raw,simple_kf_vols,moneys):
     splined_kf_vols = crs.crs_vols(simple_kf_vols,moneys,deltas=np.array([]))
 

@@ -3,7 +3,7 @@ import numpy as np
 from underlying_info import underlying_code,underlying_code_by_two_digit_code,underlyings
 from kospi_basis import kospi_strikes_from_symbols
 from random_util import options_expiry_mask,altmoneys,is_kospi,kospi_strikes_from_symbols,kospi_types_from_symbols,kospi_fresh
-from cycross import cycross
+from cycross import cross
 from bsm_implieds import fast_implieds,implied_futs,deltas,net_effect_cython
 from krx_normalize import two_level_fix_a3s
 
@@ -11,6 +11,8 @@ def save_mids(h5_pointer,some_mids):
     h5_pointer.put('twmids',some_mids)
 
 def generic_save(h5_pointer,some_stuff,expiry_code,suffix='/vols'):
+    print 'Saving ', suffix, ' :: ', expiry_code
+    print some_stuff
     if not some_stuff.empty:
         h5_pointer.put(expiry_code+suffix,some_stuff)
 
@@ -44,7 +46,7 @@ def save_supplementary(h5_pointer,pcap_info,vols_type):
         just_those_vols = h5_pointer[k]
         basis = h5_pointer['basis'][two_digit_code]
         basis.index = basis.index.astype(np.int64)
-        just_that_data['vols'] = cycross.cross(strikes,just_that_data.index.astype(long),just_those_vols.index.astype(long),just_those_vols.columns.values,just_those_vols.values)
+        just_that_data['vols'] = cross(strikes,just_that_data.index.astype(long),just_those_vols.index.astype(long),just_those_vols.columns.values,just_those_vols.values)
         just_that_data['basis'] = basis.asof(just_that_data.index).fillna(method='ffill')
         just_that_data['fut_bid'] = just_that_fut.bid1.asof(just_that_data.index).fillna(method='ffill')
         just_that_data['fut_ask'] = just_that_fut.ask1.asof(just_that_data.index).fillna(method='ffill')
@@ -59,7 +61,6 @@ def save_supplementary(h5_pointer,pcap_info,vols_type):
     h5_pointer.remove('supplementary')
     print 'Pcap Info Length exiting: ',len(pcap_info)
     h5_pointer.append('supplementary',pcap_info.ix[:,['vols','basis','fut_bid','fut_ask']])
-
 
 def save_implieds(h5_pointer, new_store,start_time,end_time,MAX_AGE=50,RISK_FREE=.03,GUESS=260):
     s = pd.Series(h5_pointer['twmids'].columns)
@@ -89,7 +90,9 @@ def save_implieds(h5_pointer, new_store,start_time,end_time,MAX_AGE=50,RISK_FREE
     implieds_frame['delta'][(implieds_frame.delta.abs()<.15).values] = np.NaN
     implieds_frame['delta_effect'] *= implieds_frame['delta']
     #implieds_frame = implieds_frame.drop_duplicates()
-    
+    implieds_frame['symbol'] = recombined_data.symbol
+    implieds_frame['fut_bid'] = recombined_data.fut_bid
+    implieds_frame['fut_ask'] = recombined_data.fut_ask 
     newdat = pd.DataFrame(two_level_fix_a3s(recombined_dat.symbol,recombined_dat.msg_type.str[1:].astype(long),recombined_dat.ix[:,['bid1','bidsize1','ask1','asksize1','bid2','bidsize2','ask2','asksize2','tradeprice','tradesize']].values),columns = ['bid1','bidsize1','ask1','asksize1','bid2','bidsize2','ask2','asksize2','tradeprice','tradesize'], index = recombined_dat.index)
     combo = implieds_frame.join(newdat,how='inner')
     print 'Preparing to save implieds info... %d,%d' % (len(implieds_frame),len(combo))
@@ -97,4 +100,3 @@ def save_implieds(h5_pointer, new_store,start_time,end_time,MAX_AGE=50,RISK_FREE
         print 'Deleteing old implieds frame...'
         new_store.remove('implieds')
     new_store.append('implieds',combo)
-    

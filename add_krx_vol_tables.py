@@ -6,12 +6,12 @@ from underlying_info import underlying_code,underlying_code_by_two_digit_code,un
 from krx_dtes import dte
 from random_util import options_expiry_mask,altmoneys
 from krx_save_functions import save_mids,save_vol_tables,save_dtes,save_syns,generic_save,save_supplementary,save_implieds
-from mids import mids
-from krx_vols import krx_vols
+from mids import quick_mids
+from krx_vols import imp_vols_cython
 from simple_models import kf_vols,splined_kf_residualized
 import cubic_regression_spline as crs
 from cy_utility import univariate_kf
-from cycross import cycross
+from cycross import cross,fix_timestamps
 
 
 
@@ -39,7 +39,7 @@ def result_dicts(some_mids,some_quotes,expiration_dict,trade_date,expiries):
             syn_spread = univariate_kf(spot.values,spot[spot.first_valid_index()],1,500)
             spot_filtered = pd.Series(syn_spread+some_mids[und_sym].values,index=spot.index)
             some_mids[basis_code] = spot_filtered
-        vol_results[exp] = krx_vols.imp_vols_cython(some_mids.ix[:,options_expiry_mask(some_mids.columns,exp).values],spot_filtered,exp_dte)
+        vol_results[exp] = imp_vols_cython(some_mids.ix[:,options_expiry_mask(some_mids.columns,exp).values],spot_filtered,exp_dte)
         money_results[exp] = pd.DataFrame(altmoneys(spot_filtered.fillna(method='ffill').fillna(method='bfill').values,
                     kospi_strikes_from_symbols(vol_results[exp].columns.values).values,exp_dte/260.0),
                     index = some_mids.index, columns = vol_results[exp].columns)
@@ -71,7 +71,7 @@ def add_vols(file_name):
     expiries = quotes_only.symbol.str[6:8].value_counts().index.values
 
     #time weighted mids via cython
-    twmids = mids.quick_mids(todays_trade_date,quotes_only)
+    twmids = quick_mids(todays_trade_date,quotes_only)
     #should be refactored into saving while building..but whatever
     vols,moneys,dtes,syns = result_dicts(twmids,quotes_only,expiration_dict,todays_trade_date,expiries)
     
@@ -93,7 +93,7 @@ def add_vols(file_name):
     print 'Finished saving vol tables to %s' %file_name
     del quotes_only
     print 'Removing duplicate timestamps...'
-    pcap_info.index = cycross.fix_timestamps(pcap_info.index.values)
+    pcap_info.index = fix_timestamps(pcap_info.index.values)
     store.remove('pcap_data')
     store.append('pcap_data',pcap_info)
     print 'Now adding supplementary info...'
@@ -107,7 +107,6 @@ def add_vols(file_name):
     save_implieds(store,store2,start_time,end_time)
     store.close()
     store2.close()
-
 
 def main(file_name):
     print 'Appending vol table info to %s ....' %file_name
